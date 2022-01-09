@@ -1,0 +1,169 @@
+---
+title: "Lego Sales Data Analysis"
+output: html_document
+---
+
+## Setup - Load packages
+
+```{r setup, include = FALSE}
+library(dplyr)
+library(tidyr)
+```
+
+## Task 1 - Bayesian posterior samples
+
+```{r load_schools}
+schools <- readRDS("data/8schools.rds")
+```
+
+### Question 1
+
+This data frame is tidy because each observation is represented by one row. One unit of observations is defined as the value that one parameter takes on each iteration from each draw by chain. The original data is more useful in this case because we can combine scalar parameters like $\mu$ and $\tau$ with vector parameters like $\theta$ and $\eta$, and easily filter by parameter, draw, iteration, or chain.
+
+### Question 2
+
+```{r task1_q2}
+# We group by chain and obtain the five number summary for mu
+schools %>%
+  ungroup() %>%
+  filter(.variable == "mu") %>%
+  group_by(.chain) %>%
+  summarise(
+    "mean" = mean(.value),
+    "q1" = quantile(.value, 0.25),
+    "median" = quantile(.value, 0.5),
+    "q3" = quantile(.value, 0.75),
+    "max" = max(.value),
+    "min" = min(.value),
+    .groups = "drop"
+  )
+```
+
+### Question 3
+
+```{r task1_q3}
+# We group by chain and school and obtain the summaries for eta
+schools %>%
+  ungroup() %>%
+  filter(.variable == "eta") %>%
+  filter(!is.na(i)) %>%
+  group_by(.chain, i) %>%
+  summarise(
+    "mean" = mean(.value),
+    "sd" = sd(.value),
+    .groups = "drop"
+  )
+```
+
+### Question 4
+
+```{r task1_q4}
+schools %>%
+  ungroup() %>%
+  filter(.variable == "theta") %>%
+  group_by(.chain, .iteration) %>%
+  # Create a new column with the largest theta
+  mutate(max_theta = max(.value)) %>%
+  filter(.value == max_theta) %>%
+  ungroup() %>%
+  group_by(.chain) %>%
+  # Count how many times each school had the largest theta
+  count(i) %>%
+  ungroup() %>%
+  mutate(percentage = n / 1000)
+```
+
+## Task 2 - Lego Sales Data
+
+```{r load_sales, message = FALSE}
+sales <- readRDS("data/lego_sales.rds")
+```
+
+### Tidying the data
+
+First, we view the data to check the data structure. We found that sales contains all of each purchasers. However, for each purchasers,they can have multiple purchases. Therefore, we use the `unnest_longer` to expand each unique purchases from each purchasers. After that, we use `unneset_wider` to put back the data from purchases into columns. The final step is to separate combined hobbies from sales into separate columns by using the `unnest_wider` with the `name_sep`. So that each row only represents a unique observation(purchase). 
+
+```{r task2_tidy}
+# Covert the `sales` object into a tidy data frame.
+sales2 <- tibble("sales" = sales) %>%
+  unnest_wider(sales) %>%
+  unnest_longer(purchases) %>%
+  # Purchases is still a list-column
+  unnest_wider(purchases) %>%
+  # Make several columns for each hobby
+  unnest_wider(hobbies, names_sep = "")
+```
+
+```{r task2_top}
+# Print out the first 10 lines of your tidy data frame
+sales2 %>%
+  head(n = 10)
+```
+
+### Question 1
+
+```{r task2_q1}
+# Counting the first names and taking top 3 counts
+sales2 %>%
+  group_by(first_name) %>%
+  summarise(n = n()) %>%
+  top_n(3)
+```
+
+### Question 2
+
+```{r task2_q2}
+# Price X Quantity gives the money made by theme
+sales2 %>%
+  group_by(Theme) %>%
+  summarise(money = sum(USPrice * Quantity)) %>%
+  top_n(1)
+```
+
+### Question 3
+
+```{r task2_q3}
+# We first count how many unique male and female buyers we have
+numbers <- sales2 %>%
+  select(first_name, last_name, gender) %>%
+  distinct() %>%
+  count(gender)
+
+# Then join and divide by the number of unique buyers by gender
+sales2 %>%
+  group_by(gender) %>%
+  summarise(sum_n = sum(Quantity)) %>%
+  left_join(numbers, by = "gender") %>%
+  mutate(mean_quantity = sum_n / n) %>%
+  select(gender, mean_quantity)
+```
+
+### Question 4
+
+```{r task2_q4}
+# Transform hobbies into long format so we can count them
+sales2 %>%
+  select(first_name, last_name, starts_with("hobbies")) %>%
+  distinct() %>% 
+  pivot_longer(starts_with("hobbies")) %>%
+  drop_na() %>%
+  count(value) %>%
+  top_n(5) %>%
+  arrange(-n)
+```
+
+### Question 5
+
+```{r task2_q5}
+sales2 %>%
+  # Create a new column with area code
+  separate(phone_number,
+    sep = "-",
+    into = c("area_code", "num2", "num3")
+  ) %>%
+  group_by(area_code) %>%
+  # Revenue equals price X quantity
+  summarise(money = sum(USPrice * Quantity)) %>%
+  na.omit() %>%
+  top_n(1)
+```
